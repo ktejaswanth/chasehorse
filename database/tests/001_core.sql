@@ -1,7 +1,9 @@
 -- Database behaviour tests. Run via database/tests/run.sh against a THROWAWAY database.
 -- Each check records PASS/FAIL in t.results; run.sh fails if any FAIL exists.
 \set ON_ERROR_STOP on
-SET search_path = app, public;
+-- Deliberately NOT including schema app: the API calls these functions with the default search_path,
+-- so the suite proves they never depend on it.
+SET search_path = public;
 
 DROP SCHEMA IF EXISTS t CASCADE;
 CREATE SCHEMA t;
@@ -486,6 +488,20 @@ SELECT t.check('J11 evidence bucket is private with a 15 MB cap',
   (SELECT NOT public AND file_size_limit = 15728640 FROM storage.buckets WHERE id='task-evidence'));
 SELECT t.check('J12 V1 placeholder tables are gone',
   to_regclass('app.users') IS NULL AND to_regclass('app.roles') IS NULL);
+
+-- ===========================================================================
+-- K. Task pricing (V7)
+-- ===========================================================================
+SELECT t.as_user('a0000000-0000-0000-0000-000000000002');
+CREATE TEMP TABLE kctx AS SELECT app.create_task('Pricing task','t','shelf','normal','b0000000-0000-0000-0000-000000000001',NULL,'a','c','s','1',16.5,80.66,200,0,now()-interval '1 minute',now()+interval '2 days','{}',(SELECT id FROM app.checklist_template_versions ORDER BY created_at LIMIT 1)) AS id;
+SELECT t.expect_ok('K1 staff can price an open task', $q$SELECT app.set_task_reward((SELECT id FROM kctx), 12345)$q$);
+SELECT t.check('K2 the reward was stored', (SELECT reward_paise = 12345 FROM app.tasks WHERE id = (SELECT id FROM kctx)));
+SELECT t.as_user('a0000000-0000-0000-0000-000000000011');
+SELECT t.expect_fail('K3 an employee cannot price a task', $q$SELECT app.set_task_reward((SELECT id FROM kctx), 99999999)$q$, 'CH403');
+SELECT t.as_user('a0000000-0000-0000-0000-000000000002');
+SELECT t.expect_fail('K4 negative reward rejected', $q$SELECT app.set_task_reward((SELECT id FROM kctx), -1)$q$, 'CH422');
+SELECT t.expect_ok('K5 assign for pricing-lock test', $q$SELECT app.assign_task((SELECT id FROM kctx), 'a0000000-0000-0000-0000-000000000011')$q$);
+SELECT t.expect_fail('K6 reward is locked once the task is in flight', $q$SELECT app.set_task_reward((SELECT id FROM kctx), 1)$q$, 'CH409');
 
 -- ---------------------------------------------------------------------------
 SELECT n, CASE WHEN ok THEN 'PASS' ELSE 'FAIL' END AS result, name, CASE WHEN ok THEN '' ELSE detail END AS detail FROM t.results ORDER BY n;

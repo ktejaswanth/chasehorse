@@ -1,0 +1,10 @@
+# Production profile: structured JSON logs, API docs off unless explicitly enabled.
+logging:
+  structured:
+    format:
+      console: logstash
+springdoc:
+  api-docs:
+    enabled: ${OPENAPI_ENABLED:false}
+  swagger-ui:
+    enabled: ${OPENAPI_ENABLED:false}
